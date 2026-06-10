@@ -15,6 +15,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
+import android.content.pm.ServiceInfo
 
 class ScreenCaptureService : Service() {
 

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.aquille.gassist">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -36,6 +37,7 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- foregroundServiceType wajib ada di manifest untuk Android 14+ -->
         <service
             android:name=".ScreenCaptureService"
             android:foregroundServiceType="mediaProjection"

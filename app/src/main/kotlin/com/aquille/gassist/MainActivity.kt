@@ -36,7 +36,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         settingsManager = SettingsManager(this)
-
         tvLog = findViewById(R.id.tvLog)
         tvStatus = findViewById(R.id.tvStatus)
         etGoal = findViewById(R.id.etGoal)
@@ -54,35 +53,45 @@ class MainActivity : AppCompatActivity() {
 
     private fun startAutomation() {
         val goal = etGoal.text.toString().trim()
-        if (goal.isEmpty()) {
-            log("⚠ Enter a goal first")
-            return
-        }
-
-        if (!settingsManager.hasApiKey()) {
-            log("⚠ API Key not set! Tap ⚙ Settings to add your Gemini API Key.")
-            return
-        }
-
+        if (goal.isEmpty()) { log("⚠ Enter a goal first"); return }
+        if (!settingsManager.hasApiKey()) { log("⚠ API Key not set! Tap ⚙ Settings."); return }
         if (AutomationAccessibilityService.instance == null) {
             log("⚠ Accessibility Service not enabled!\nGo to Settings > Accessibility > GAssist")
             return
         }
 
-        val projManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        startActivityForResult(projManager.createScreenCaptureIntent(), PROJECTION_REQUEST)
+        // STEP 1: Start foreground service DULU (wajib Android 14+ sebelum getMediaProjection)
+        log("⏳ Starting foreground service...")
+        val primeIntent = Intent(this, ScreenCaptureService::class.java)
+        startForegroundService(primeIntent)
+
+        // STEP 2: Baru request screen capture permission
+        mainHandler.postDelayed({
+            val projManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            startActivityForResult(projManager.createScreenCaptureIntent(), PROJECTION_REQUEST)
+        }, 500) // jeda 500ms biar service sempat start
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == PROJECTION_REQUEST && resultCode == Activity.RESULT_OK && data != null) {
-            val serviceIntent = Intent(this, ScreenCaptureService::class.java).apply {
+            // STEP 3: Kirim projection data ke service yang sudah running
+            val projIntent = Intent(this, ScreenCaptureService::class.java).apply {
+                action = ScreenCaptureService.ACTION_START_PROJECTION
                 putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, resultCode)
                 putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, data)
             }
-            startForegroundService(serviceIntent)
-            log("⏳ Starting screen capture service...")
-            mainHandler.postDelayed({ runAutomationLoop() }, 2500)
+            startForegroundService(projIntent)
+            log("✅ Permission granted, capturing...")
+
+            // STEP 4: Minimize app dulu biar screenshot layar luar (bukan UI GAssist)
+            log("📱 Minimizing app in 2s...")
+            mainHandler.postDelayed({
+                moveTaskToBack(true) // minimize ke background
+                mainHandler.postDelayed({ runAutomationLoop() }, 1000) // tunggu animasi minimize
+            }, 2000)
+        } else {
+            log("✗ Screen capture permission denied")
         }
     }
 
@@ -92,9 +101,11 @@ class MainActivity : AppCompatActivity() {
         isRunning = true
         actionHistory.clear()
 
-        btnRun.visibility = Button.GONE
-        btnStop.visibility = Button.VISIBLE
-        setStatus("Running...")
+        mainHandler.post {
+            btnRun.visibility = Button.GONE
+            btnStop.visibility = Button.VISIBLE
+            setStatus("Running...")
+        }
 
         executor.execute {
             var stepCount = 0
@@ -102,15 +113,14 @@ class MainActivity : AppCompatActivity() {
 
             while (isRunning && stepCount < maxSteps) {
                 stepCount++
-                log("\n[Step $stepCount]")
+                log("[Step $stepCount]")
 
                 val screenshot = ScreenCaptureService.instance?.captureScreen()
                 if (screenshot == null) {
-                    val svcAlive = ScreenCaptureService.instance != null
-                    log("✗ Screenshot failed (service alive: $svcAlive)")
+                    log("✗ Screenshot failed (service=${ScreenCaptureService.instance != null}, ready=${ScreenCaptureService.isReady})")
                     break
                 }
-                log("📷 Screen captured (${screenshot.width}x${screenshot.height})")
+                log("📷 Captured ${screenshot.width}x${screenshot.height}")
 
                 setStatus("Thinking...")
                 val action = try {
@@ -133,20 +143,17 @@ class MainActivity : AppCompatActivity() {
 
                 val accessibility = AutomationAccessibilityService.instance
                 when (action.action) {
-                    "tap" -> accessibility?.performTap(action.x, action.y)
+                    "tap"   -> accessibility?.performTap(action.x, action.y)
                     "swipe" -> accessibility?.performSwipe(action.x, action.y, action.x2, action.y2)
-                    "type" -> accessibility?.performType(action.text)
-                    "wait" -> Thread.sleep(1000)
-                    "done" -> {
-                        log("\n✅ Task complete!")
-                        break
-                    }
+                    "type"  -> accessibility?.performType(action.text)
+                    "wait"  -> Thread.sleep(1500)
+                    "done"  -> { log("✅ Task complete!"); mainHandler.post { stopAutomation() }; return@execute }
                 }
 
                 Thread.sleep(1500)
             }
 
-            if (stepCount >= maxSteps) log("\n⚠ Max steps reached")
+            if (stepCount >= maxSteps) log("⚠ Max steps reached")
             mainHandler.post { stopAutomation() }
         }
     }
@@ -159,23 +166,17 @@ class MainActivity : AppCompatActivity() {
         stopService(Intent(this, ScreenCaptureService::class.java))
     }
 
-    private fun formatParams(action: GeminiHelper.AiAction): String {
-        return when (action.action) {
-            "tap" -> "(${action.x},${action.y})"
-            "swipe" -> "(${action.x},${action.y})→(${action.x2},${action.y2})"
-            "type" -> "\"${action.text}\""
-            else -> ""
-        }
+    private fun formatParams(a: GeminiHelper.AiAction) = when (a.action) {
+        "tap"   -> "(${a.x},${a.y})"
+        "swipe" -> "(${a.x},${a.y})→(${a.x2},${a.y2})"
+        "type"  -> "\"${a.text}\""
+        else    -> ""
     }
 
-    private fun log(msg: String) {
-        mainHandler.post {
-            tvLog.append("$msg\n")
-            scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
-        }
+    private fun log(msg: String) = mainHandler.post {
+        tvLog.append("$msg\n")
+        scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
-    private fun setStatus(status: String) {
-        mainHandler.post { tvStatus.text = "Status: $status" }
-    }
+    private fun setStatus(s: String) = mainHandler.post { tvStatus.text = "Status: $s" }
 }

@@ -54,28 +54,27 @@ class ScreenCaptureService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notif = buildNotification()
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(1, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-            } else {
-                startForeground(1, notif)
-            }
-        } catch (e: Exception) {
-            lastError = "startForeground Error: ${e.message}"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        } else {
+            startForeground(1, notif)
         }
 
         if (intent?.action == ACTION_INIT) {
-            val code = intent.getIntExtra(EXTRA_CODE, -1)
+            // PERBAIKAN: Gunakan default value yang bukan RESULT_OK (-1)
+            val code = intent.getIntExtra(EXTRA_CODE, 0) 
             val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 intent.getParcelableExtra(EXTRA_DATA, Intent::class.java)
             } else {
                 @Suppress("DEPRECATION")
                 intent.getParcelableExtra(EXTRA_DATA)
             }
-            if (code != -1 && data != null) {
+            
+            // RESULT_OK adalah -1, jadi kita cek apakah code != 0
+            if (code != 0 && data != null) {
                 setupProjection(code, data)
             } else {
-                lastError = "Init Error: Code=$code, Data=${data != null}"
+                lastError = "Init Data Invalid: code=$code"
             }
         }
 
@@ -96,17 +95,16 @@ class ScreenCaptureService : Service() {
 
             mediaProjection = pm.getMediaProjection(code, data)
             if (mediaProjection == null) {
-                lastError = "MediaProjection is NULL (User denied or system revoked)"
+                lastError = "MediaProjection NULL"
                 return
             }
 
+            // Gunakan maxImages=5 agar lebih stabil
             imageReader = ImageReader.newInstance(screenW, screenH, PixelFormat.RGBA_8888, 5)
 
-            imageReader!!.setOnImageAvailableListener({ reader ->
-                if (!isReady) {
-                    isReady = true
-                    lastError = "First Frame OK"
-                }
+            imageReader!!.setOnImageAvailableListener({ _ ->
+                isReady = true
+                lastError = "Ready"
             }, readerHandler)
 
             virtualDisplay = mediaProjection?.createVirtualDisplay(
@@ -115,16 +113,10 @@ class ScreenCaptureService : Service() {
                 metrics.densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader!!.surface,
-                object : VirtualDisplay.Callback() {
-                    override fun onStopped() { 
-                        isReady = false
-                        lastError = "VirtualDisplay Stopped" 
-                    }
-                }, 
-                readerHandler
+                null, readerHandler
             )
             
-            lastError = "VD Created, Waiting Frame..."
+            lastError = "Waiting for first frame..."
         } catch (e: Exception) {
             lastError = "Setup Error: ${e.message}"
         }
@@ -132,28 +124,23 @@ class ScreenCaptureService : Service() {
 
     fun captureScreen(): Bitmap? {
         if (imageReader == null) {
-            lastError = "Reader NULL"
+            // Coba beri tahu user jika service belum di-init
+            lastError = "Reader is NULL (Not initialized?)"
             return null
         }
 
-        // Wait with diagnostic
-        val deadline = System.currentTimeMillis() + 4_000L
+        // Tunggu frame pertama
+        val deadline = System.currentTimeMillis() + 5000L
         while (!isReady && System.currentTimeMillis() < deadline) {
-            // Force poke
+            // Pancing frame
             readerHandler.post {
-                try {
-                    val img = imageReader?.acquireLatestImage()
-                    if (img != null) {
-                        img.close()
-                        isReady = true
-                    }
-                } catch (e: Exception) {}
+                try { imageReader?.acquireLatestImage()?.close() } catch (e: Exception) {}
             }
             Thread.sleep(200)
         }
 
         if (!isReady) {
-            lastError = "Timeout waiting for frame (Screen might be static or black)"
+            lastError = "Frame Timeout (Is screen static?)"
             return null
         }
 
@@ -178,16 +165,12 @@ class ScreenCaptureService : Service() {
                         )
                         bitmap.copyPixelsFromBuffer(buffer)
                         result = Bitmap.createBitmap(bitmap, 0, 0, screenW, screenH)
-                    } catch (e: Exception) {
-                        lastError = "Bitmap Error: ${e.message}"
                     } finally {
                         image.close()
                     }
-                } else {
-                    lastError = "acquireLatestImage NULL"
                 }
             } catch (e: Exception) {
-                lastError = "Reader Thread Error: ${e.message}"
+                lastError = "Capture Error: ${e.message}"
             } finally {
                 latch.countDown()
             }
@@ -199,8 +182,8 @@ class ScreenCaptureService : Service() {
 
     private fun buildNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("GAssist Diagnostic")
-            .setContentText("Capture Service Active")
+            .setContentTitle("GAssist")
+            .setContentText("Screen Capture Running")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
             .build()
@@ -208,7 +191,7 @@ class ScreenCaptureService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "Diagnostic", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL_ID, "Capture", NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
     }
@@ -218,7 +201,6 @@ class ScreenCaptureService : Service() {
         virtualDisplay?.release()
         mediaProjection?.stop()
         imageReader?.close()
-        readerThread.quitSafely()
         instance = null
         super.onDestroy()
     }

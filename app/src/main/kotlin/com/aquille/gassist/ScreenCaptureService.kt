@@ -1,6 +1,7 @@
 package com.aquille.gassist
 
 import android.app.*
+import android.app.ServiceInfo
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap

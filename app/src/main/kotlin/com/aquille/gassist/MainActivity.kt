@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ScrollView
@@ -17,7 +18,6 @@ import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
-    // ── UI ──────────────────────────────────────────────────────────────────
     private lateinit var tvLog:      TextView
     private lateinit var tvStatus:   TextView
     private lateinit var etGoal:     EditText
@@ -26,7 +26,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSettings: Button
     private lateinit var scrollView: ScrollView
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
     private lateinit var settingsManager: SettingsManager
     private lateinit var overlayManager:  OverlayManager
 
@@ -37,8 +36,6 @@ class MainActivity : AppCompatActivity() {
     private val actionHistory           = StringBuilder()
     private val PROJECTION_REQUEST      = 100
     private val OVERLAY_PERMISSION_REQ  = 101
-
-    // ── Lifecycle ────────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,26 +58,18 @@ class MainActivity : AppCompatActivity() {
         btnStop.setOnClickListener    { stopAutomation() }
         btnSettings.setOnClickListener{ startActivity(Intent(this, SettingsActivity::class.java)) }
 
-        // Log awal hanya ditampilkan setelah semua cek selesai
         runStartupChecks()
     }
 
-    // ── Startup Checks ────────────────────────────────────────────────────────
-
     private fun runStartupChecks() {
-        // 1. Cek internet
         if (!NetworkUtils.isInternetAvailable(this)) {
             showNoInternetDialog()
             return
         }
-
-        // 2. Cek accessibility
         if (!isAccessibilityEnabled()) {
             showAccessibilityDialog()
             return
         }
-
-        // 3. Semua OK
         log("[GAssist Ready]")
         setStatus("Idle")
     }
@@ -97,7 +86,7 @@ class MainActivity : AppCompatActivity() {
     private fun showNoInternetDialog() {
         AlertDialog.Builder(this)
             .setTitle("No Internet Connection")
-            .setMessage("GAssist requires an active internet connection to work. Please connect and try again.")
+            .setMessage("GAssist requires an active internet connection to work.")
             .setCancelable(false)
             .setPositiveButton("OK") { _, _ -> finish() }
             .show()
@@ -106,10 +95,7 @@ class MainActivity : AppCompatActivity() {
     private fun showAccessibilityDialog() {
         AlertDialog.Builder(this)
             .setTitle("Accessibility Permission Required")
-            .setMessage(
-                "GAssist needs Accessibility Service access to control your screen.\n\n" +
-                "Tap OK to open Accessibility Settings, then enable GAssist."
-            )
+            .setMessage("GAssist needs Accessibility Service access to control your screen.")
             .setCancelable(false)
             .setPositiveButton("OK") { _, _ ->
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -120,38 +106,28 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-cek setelah user balik dari Accessibility/Overlay settings
-        // Jangan re-run kalau automation sedang berjalan
         if (!isRunning) {
             val logText = tvLog.text.toString()
-            when {
-                // Belum ada teks apapun → jalankan startup check penuh
-                logText.isEmpty() -> runStartupChecks()
-                // Sudah ada log tapi accessibility baru diaktifkan → tampilkan Ready
-                !logText.contains("[GAssist Ready]")
-                    && isAccessibilityEnabled()
-                    && NetworkUtils.isInternetAvailable(this) -> {
-                    log("[GAssist Ready]")
-                    setStatus("Idle")
-                }
+            if (logText.isEmpty()) {
+                runStartupChecks()
+            } else if (!logText.contains("[GAssist Ready]") && isAccessibilityEnabled()) {
+                log("[GAssist Ready]")
+                setStatus("Idle")
             }
         }
     }
 
-    // ── Automation Flow ───────────────────────────────────────────────────────
-
     private fun startAutomation() {
         val goal = etGoal.text.toString().trim()
-        if (goal.isEmpty())              { log("⚠ Enter a goal first"); return }
+        if (goal.isEmpty()) { log("⚠ Enter a goal first"); return }
         if (!NetworkUtils.isInternetAvailable(this)) { showNoInternetDialog(); return }
-        if (!settingsManager.hasApiKey()){ log("⚠ API Key not set! Tap ⚙ Settings."); return }
+        if (!settingsManager.hasApiKey()){ log("⚠ API Key not set!"); return }
         if (!isAccessibilityEnabled())   { showAccessibilityDialog(); return }
 
-        // Cek overlay permission (SYSTEM_ALERT_WINDOW) untuk "AI is working" overlay
         if (!Settings.canDrawOverlays(this)) {
             AlertDialog.Builder(this)
                 .setTitle("Overlay Permission Needed")
-                .setMessage("GAssist needs 'Appear on top' permission to show the AI overlay while working.")
+                .setMessage("GAssist needs 'Appear on top' permission.")
                 .setPositiveButton("Grant") { _, _ ->
                     startActivityForResult(
                         Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -163,63 +139,68 @@ class MainActivity : AppCompatActivity() {
                 .show()
             return
         }
-
         proceedToCapture()
     }
 
     private fun proceedToCapture() {
         log("⏳ Starting capture service...")
-        // STEP 1: foreground service jalan DULU
-        startForegroundService(Intent(this, ScreenCaptureService::class.java))
+        // Pastikan service dimulai sebagai foreground sebelum request projection (Syarat Android 14)
+        val serviceIntent = Intent(this, ScreenCaptureService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
 
-        // STEP 2: request permission (500ms jeda biar service beneran running)
         mainHandler.postDelayed({
             val pm = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-            startActivityForResult(pm.createScreenCaptureIntent(), PROJECTION_REQUEST)
-        }, 500)
+            try {
+                startActivityForResult(pm.createScreenCaptureIntent(), PROJECTION_REQUEST)
+            } catch (e: Exception) {
+                log("✗ Failed to start projection: ${e.message}")
+            }
+        }, 800) // Sedikit ditambah jedanya agar lebih aman
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-
         when (requestCode) {
-            OVERLAY_PERMISSION_REQ -> {
-                // Dari halaman overlay permission — langsung lanjut
-                proceedToCapture()
-            }
+            OVERLAY_PERMISSION_REQ -> proceedToCapture()
             PROJECTION_REQUEST -> {
                 if (resultCode == Activity.RESULT_OK && data != null) {
-                    // STEP 3: Kirim projection data ke service yang sudah running
                     val initIntent = Intent(this, ScreenCaptureService::class.java).apply {
                         action = ScreenCaptureService.ACTION_INIT
                         putExtra(ScreenCaptureService.EXTRA_CODE, resultCode)
                         putExtra(ScreenCaptureService.EXTRA_DATA, data)
                     }
-                    startForegroundService(initIntent)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        startForegroundService(initIntent)
+                    } else {
+                        startService(initIntent)
+                    }
                     log("✅ Permission granted")
 
-                    // STEP 4: Minimize app → screenshot layar luar
-                    log("📱 Minimizing in 2s...")
+                    log("📱 Minimizing...")
                     mainHandler.postDelayed({
                         moveTaskToBack(true)
-                        mainHandler.postDelayed({ runLoop() }, 1000)
-                    }, 2000)
+                        // Beri waktu lebih lama setelah minimize agar layar refresh
+                        mainHandler.postDelayed({ runLoop() }, 1500)
+                    }, 1000)
                 } else {
                     log("✗ Screen capture denied")
+                    stopService(Intent(this, ScreenCaptureService::class.java))
                 }
             }
         }
     }
 
-    // ── Main Loop ─────────────────────────────────────────────────────────────
-
     private fun runLoop() {
+        if (isRunning) return
         val goal   = etGoal.text.toString().trim()
         val apiKey = settingsManager.getApiKey()
         isRunning  = true
         actionHistory.clear()
 
-        // Tampilkan overlay "AI is working"
         if (Settings.canDrawOverlays(this)) overlayManager.show()
 
         mainHandler.post {
@@ -229,59 +210,72 @@ class MainActivity : AppCompatActivity() {
         }
 
         executor.execute {
-            var step = 0
-            val maxSteps = 20
+            try {
+                var step = 0
+                val maxSteps = 20
 
-            while (isRunning && step < maxSteps) {
-                step++
-                log("[Step $step]")
+                while (isRunning && step < maxSteps) {
+                    step++
+                    log("[Step $step]")
 
-                // Capture
-                val bmp = ScreenCaptureService.instance?.captureScreen()
-                if (bmp == null) {
-                    log("✗ Screenshot failed (svc=${ScreenCaptureService.instance != null}, ready=${ScreenCaptureService.isReady})")
-                    break
-                }
-                log("📷 ${bmp.width}×${bmp.height}")
-
-                // AI
-                setStatus("Thinking...")
-                val action = try {
-                    GeminiHelper.analyze(
-                        apiKey        = apiKey,
-                        screenshot    = bmp,
-                        goal          = goal,
-                        history       = actionHistory.toString(),
-                        originalWidth = bmp.width,
-                        originalHeight= bmp.height
-                    )
-                } catch (e: Exception) {
-                    log("✗ API: ${e.message}")
-                    break
-                }
-
-                log("💭 ${action.thought}")
-                log("▶ ${action.action} ${fmtParams(action)}")
-                actionHistory.append("${action.action}(${fmtParams(action)}), ")
-                setStatus(action.action)
-
-                val a11y = AutomationAccessibilityService.instance
-                when (action.action) {
-                    "tap"   -> a11y?.performTap(action.x, action.y)
-                    "swipe" -> a11y?.performSwipe(action.x, action.y, action.x2, action.y2)
-                    "type"  -> a11y?.performType(action.text)
-                    "wait"  -> Thread.sleep(1500)
-                    "done"  -> {
-                        log("✅ Task complete!")
-                        mainHandler.post { stopAutomation() }
-                        return@execute
+                    // Capture dengan retry logic di dalam service
+                    val bmp = ScreenCaptureService.instance?.captureScreen()
+                    if (bmp == null) {
+                        val svcActive = ScreenCaptureService.instance != null
+                        val isReady = ScreenCaptureService.isReady
+                        log("✗ Screenshot failed (svc=$svcActive, ready=$isReady)")
+                        // Jika gagal, coba tunggu sebentar lagi sebelum menyerah
+                        Thread.sleep(2000)
+                        val retryBmp = ScreenCaptureService.instance?.captureScreen()
+                        if (retryBmp == null) break else { /* continue with retryBmp */ }
                     }
-                }
-                Thread.sleep(1500)
-            }
+                    
+                    val currentBmp = bmp ?: continue
+                    log("📷 ${currentBmp.width}×${currentBmp.height}")
 
-            if (step >= maxSteps) log("⚠ Max steps reached")
-            mainHandler.post { stopAutomation() }
+                    setStatus("Thinking...")
+                    val action = try {
+                        GeminiHelper.analyze(
+                            apiKey        = apiKey,
+                            screenshot    = currentBmp,
+                            goal          = goal,
+                            history       = actionHistory.toString(),
+                            originalWidth = currentBmp.width,
+                            originalHeight= currentBmp.height
+                        )
+                    } catch (e: Exception) {
+                        log("✗ API Error: ${e.message}")
+                        break
+                    }
+
+                    log("💭 ${action.thought}")
+                    log("▶ ${action.action}")
+                    actionHistory.append("${action.action}, ")
+                    setStatus(action.action)
+
+                    val a11y = AutomationAccessibilityService.instance
+                    if (a11y == null) {
+                        log("⚠ Accessibility Service not running!")
+                        break
+                    }
+
+                    when (action.action) {
+                        "tap"   -> a11y.performTap(action.x, action.y)
+                        "swipe" -> a11y.performSwipe(action.x, action.y, action.x2, action.y2)
+                        "type"  -> a11y.performType(action.text)
+                        "wait"  -> Thread.sleep(2000)
+                        "done"  -> {
+                            log("✅ Task complete!")
+                            break
+                        }
+                    }
+                    Thread.sleep(2000)
+                }
+            } catch (e: Exception) {
+                log("✗ Loop Error: ${e.message}")
+            } finally {
+                mainHandler.post { stopAutomation() }
+            }
         }
     }
 
@@ -294,18 +288,10 @@ class MainActivity : AppCompatActivity() {
         stopService(Intent(this, ScreenCaptureService::class.java))
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private fun fmtParams(a: GeminiHelper.AiAction) = when (a.action) {
-        "tap"   -> "(${a.x},${a.y})"
-        "swipe" -> "(${a.x},${a.y})→(${a.x2},${a.y2})"
-        "type"  -> "\"${a.text}\""
-        else    -> ""
-    }
-
     private fun log(msg: String) = mainHandler.post {
         tvLog.append("$msg\n")
         scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
+        Log.d("GAssist", msg)
     }
 
     private fun setStatus(s: String) = mainHandler.post {

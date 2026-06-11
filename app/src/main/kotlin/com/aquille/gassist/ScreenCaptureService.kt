@@ -12,145 +12,176 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
-import android.os.Looper
 import androidx.core.app.NotificationCompat
-import android.content.pm.ServiceInfo
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class ScreenCaptureService : Service() {
 
     companion object {
-        const val CHANNEL_ID = "screen_capture"
-        const val ACTION_START_PROJECTION = "start_projection"
-        const val EXTRA_RESULT_CODE = "result_code"
-        const val EXTRA_RESULT_DATA = "result_data"
+        const val CHANNEL_ID    = "gassist_capture"
+        const val ACTION_INIT   = "init_projection"
+        const val EXTRA_CODE    = "result_code"
+        const val EXTRA_DATA    = "result_data"
 
         var instance: ScreenCaptureService? = null
-        var isReady = false
+        // true setelah VirtualDisplay terbentuk dan frame pertama sudah masuk
+        @Volatile var isReady = false
     }
 
     private var mediaProjection: MediaProjection? = null
-    private var virtualDisplay: VirtualDisplay? = null
-    private var imageReader: ImageReader? = null
-    private var screenWidth = 1080
-    private var screenHeight = 2400
+    private var virtualDisplay:  VirtualDisplay?  = null
+    private var imageReader:     ImageReader?      = null
+
+    // Background thread khusus untuk ImageReader — wajib, jangan pakai main thread
+    private val readerThread  = HandlerThread("GAssistReader").also { it.start() }
+    private val readerHandler = Handler(readerThread.looper)
+
+    private var screenW = 0
+    private var screenH = 0
+
+    // ──────────────────────────────────────────────
+    // Lifecycle
+    // ──────────────────────────────────────────────
 
     override fun onCreate() {
         super.onCreate()
         instance = this
-        isReady = false
+        isReady  = false
         createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Selalu startForeground dulu sebelum apapun — wajib Android 14+
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("GAssist")
-            .setContentText("Screen capture active")
-            .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
+        // 1. startForeground PERTAMA — wajib Android 14+ sebelum apapun
+        val notif = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            startForeground(1, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         } else {
-            startForeground(1, notification)
+            startForeground(1, notif)
         }
 
-        // Kalau intent bawa projection data, setup sekarang
-        if (intent?.action == ACTION_START_PROJECTION) {
-            val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
-            val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+        // 2. Kalau intent bawa data projection, setup sekarang
+        if (intent?.action == ACTION_INIT) {
+            val code = intent.getIntExtra(EXTRA_CODE, -1)
+            val data: Intent? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra(EXTRA_DATA, Intent::class.java)
             } else {
                 @Suppress("DEPRECATION")
-                intent.getParcelableExtra(EXTRA_RESULT_DATA)
+                intent.getParcelableExtra(EXTRA_DATA)
             }
-
-            if (resultCode != -1 && resultData != null) {
-                val metrics = resources.displayMetrics
-                screenWidth = metrics.widthPixels
-                screenHeight = metrics.heightPixels
-
-                val projManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                mediaProjection = projManager.getMediaProjection(resultCode, resultData)
-                setupVirtualDisplay()
-            }
+            if (code != -1 && data != null) setupProjection(code, data)
         }
 
         return START_NOT_STICKY
     }
 
-    private fun setupVirtualDisplay() {
-        imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2)
+    // ──────────────────────────────────────────────
+    // Setup
+    // ──────────────────────────────────────────────
 
-        // Set listener supaya kita tau kapan frame pertama tersedia
-        imageReader?.setOnImageAvailableListener({
-            isReady = true
-        }, Handler(Looper.getMainLooper()))
+    private fun setupProjection(code: Int, data: Intent) {
+        val metrics = resources.displayMetrics
+        screenW = metrics.widthPixels
+        screenH = metrics.heightPixels
+
+        val pm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        mediaProjection = pm.getMediaProjection(code, data)
+
+        // ImageReader dengan maxImages=3 supaya tidak "maxImages acquired" error
+        imageReader = ImageReader.newInstance(screenW, screenH, PixelFormat.RGBA_8888, 3)
+
+        // Listener di background thread — JANGAN main thread (crash)
+        imageReader!!.setOnImageAvailableListener({ _ ->
+            isReady = true   // frame pertama sudah masuk, siap di-acquire
+        }, readerHandler)
 
         virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "GAssistCapture",
-            screenWidth, screenHeight,
-            resources.displayMetrics.densityDpi,
+            "GAssistVD",
+            screenW, screenH,
+            metrics.densityDpi,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
+            imageReader!!.surface,
             null, null
         )
     }
 
+    // ──────────────────────────────────────────────
+    // Capture — dipanggil dari background thread executor di MainActivity
+    // ──────────────────────────────────────────────
+
     fun captureScreen(): Bitmap? {
-        // Tunggu sampai frame pertama tersedia (max 5 detik)
-        val deadline = System.currentTimeMillis() + 5000
+        // Tunggu frame pertama tersedia, max 6 detik
+        val deadline = System.currentTimeMillis() + 6_000L
         while (!isReady && System.currentTimeMillis() < deadline) {
             Thread.sleep(100)
         }
         if (!isReady) return null
 
-        // Retry 5x — frame bisa kadang null meski listener sudah fired
-        repeat(5) {
+        // Pakai latch agar kita bisa blok thread pemanggil sampai frame benar-benar ada
+        val latch  = CountDownLatch(1)
+        var result: Bitmap? = null
+
+        readerHandler.post {
             val image = imageReader?.acquireLatestImage()
             if (image != null) {
-                return try {
-                    val planes = image.planes
-                    val buffer = planes[0].buffer
-                    val pixelStride = planes[0].pixelStride
-                    val rowStride = planes[0].rowStride
-                    val rowPadding = rowStride - pixelStride * screenWidth
+                try {
+                    val plane      = image.planes[0]
+                    val buf        = plane.buffer
+                    val pxStride   = plane.pixelStride
+                    val rowStride  = plane.rowStride
+                    val rowPad     = rowStride - pxStride * screenW
 
-                    val bitmap = Bitmap.createBitmap(
-                        screenWidth + rowPadding / pixelStride,
-                        screenHeight,
+                    val bmp = Bitmap.createBitmap(
+                        screenW + rowPad / pxStride,
+                        screenH,
                         Bitmap.Config.ARGB_8888
                     )
-                    bitmap.copyPixelsFromBuffer(buffer)
-                    Bitmap.createBitmap(bitmap, 0, 0, screenWidth, screenHeight)
+                    bmp.copyPixelsFromBuffer(buf)
+                    result = Bitmap.createBitmap(bmp, 0, 0, screenW, screenH)
                 } finally {
                     image.close()
                 }
             }
-            Thread.sleep(200)
+            latch.countDown()
         }
-        return null
+
+        latch.await(3, TimeUnit.SECONDS)
+        return result
+    }
+
+    // ──────────────────────────────────────────────
+    // Notification & Channel
+    // ──────────────────────────────────────────────
+
+    private fun buildNotification(): Notification {
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("GAssist")
+            .setContentText("Screen capture active")
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
     }
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Screen Capture",
-            NotificationManager.IMPORTANCE_LOW
-        )
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        val ch = NotificationChannel(CHANNEL_ID, "Screen Capture", NotificationManager.IMPORTANCE_LOW)
+        getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    // ──────────────────────────────────────────────
+    // Cleanup
+    // ──────────────────────────────────────────────
 
     override fun onDestroy() {
         isReady = false
         virtualDisplay?.release()
         mediaProjection?.stop()
         imageReader?.close()
+        readerThread.quitSafely()
         instance = null
         super.onDestroy()
     }
+
+    override fun onBind(intent: Intent?): IBinder? = null
 }

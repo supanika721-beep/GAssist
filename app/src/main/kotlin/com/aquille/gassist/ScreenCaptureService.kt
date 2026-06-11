@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
 class ScreenCaptureService : Service() {
 
     companion object {
-        private const val TAG = "ScreenCaptureService"
+        private const val TAG = "GAssist_Capture"
         const val CHANNEL_ID    = "gassist_capture"
         const val ACTION_INIT   = "init_projection"
         const val EXTRA_CODE    = "result_code"
@@ -31,6 +31,7 @@ class ScreenCaptureService : Service() {
 
         var instance: ScreenCaptureService? = null
         @Volatile var isReady = false
+        @Volatile var lastError: String = "None"
     }
 
     private var mediaProjection: MediaProjection? = null
@@ -47,16 +48,20 @@ class ScreenCaptureService : Service() {
         super.onCreate()
         instance = this
         isReady  = false
+        lastError = "Service Created"
         createNotificationChannel()
-        Log.d(TAG, "Service Created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notif = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(1, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
-        } else {
-            startForeground(1, notif)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(1, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            } else {
+                startForeground(1, notif)
+            }
+        } catch (e: Exception) {
+            lastError = "startForeground Error: ${e.message}"
         }
 
         if (intent?.action == ACTION_INIT) {
@@ -70,7 +75,7 @@ class ScreenCaptureService : Service() {
             if (code != -1 && data != null) {
                 setupProjection(code, data)
             } else {
-                Log.e(TAG, "Invalid projection data received")
+                lastError = "Init Error: Code=$code, Data=${data != null}"
             }
         }
 
@@ -78,64 +83,77 @@ class ScreenCaptureService : Service() {
     }
 
     private fun setupProjection(code: Int, data: Intent) {
-        Log.d(TAG, "Setting up projection...")
-        val metrics = resources.displayMetrics
-        screenW = metrics.widthPixels
-        screenH = metrics.heightPixels
+        try {
+            val metrics = resources.displayMetrics
+            screenW = metrics.widthPixels
+            screenH = metrics.heightPixels
 
-        val pm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        
-        // Cleanup existing projection if any
-        virtualDisplay?.release()
-        mediaProjection?.stop()
-        imageReader?.close()
+            val pm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            
+            virtualDisplay?.release()
+            mediaProjection?.stop()
+            imageReader?.close()
 
-        mediaProjection = pm.getMediaProjection(code, data)
-        
-        // Gunakan PixelFormat.RGBA_8888 dan pastikan maxImages cukup (3-5)
-        imageReader = ImageReader.newInstance(screenW, screenH, PixelFormat.RGBA_8888, 5)
-
-        imageReader!!.setOnImageAvailableListener({ _ ->
-            if (!isReady) {
-                Log.d(TAG, "First frame received, service is now ready")
-                isReady = true
+            mediaProjection = pm.getMediaProjection(code, data)
+            if (mediaProjection == null) {
+                lastError = "MediaProjection is NULL (User denied or system revoked)"
+                return
             }
-        }, readerHandler)
 
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "GAssistVD",
-            screenW, screenH,
-            metrics.densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader!!.surface,
-            object : VirtualDisplay.Callback() {
-                override fun onPaused() { Log.d(TAG, "VirtualDisplay Paused") }
-                override fun onResumed() { Log.d(TAG, "VirtualDisplay Resumed") }
-                override fun onStopped() { Log.d(TAG, "VirtualDisplay Stopped") }
-            }, 
-            readerHandler
-        )
+            imageReader = ImageReader.newInstance(screenW, screenH, PixelFormat.RGBA_8888, 5)
+
+            imageReader!!.setOnImageAvailableListener({ reader ->
+                if (!isReady) {
+                    isReady = true
+                    lastError = "First Frame OK"
+                }
+            }, readerHandler)
+
+            virtualDisplay = mediaProjection?.createVirtualDisplay(
+                "GAssistVD",
+                screenW, screenH,
+                metrics.densityDpi,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader!!.surface,
+                object : VirtualDisplay.Callback() {
+                    override fun onStopped() { 
+                        isReady = false
+                        lastError = "VirtualDisplay Stopped" 
+                    }
+                }, 
+                readerHandler
+            )
+            
+            lastError = "VD Created, Waiting Frame..."
+        } catch (e: Exception) {
+            lastError = "Setup Error: ${e.message}"
+        }
     }
 
     fun captureScreen(): Bitmap? {
-        // Jika belum ready, tunggu sebentar (mungkin layar sedang statis)
-        if (!isReady) {
-            Log.w(TAG, "Capture requested but not ready, waiting...")
-            val deadline = System.currentTimeMillis() + 3_000L
-            while (!isReady && System.currentTimeMillis() < deadline) {
-                // Coba "pancing" dengan acquireLatestImage meski isReady false
-                val img = imageReader?.acquireLatestImage()
-                if (img != null) {
-                    img.close()
-                    isReady = true
-                    break
-                }
-                Thread.sleep(200)
-            }
+        if (imageReader == null) {
+            lastError = "Reader NULL"
+            return null
         }
 
-        if (imageReader == null) {
-            Log.e(TAG, "Capture failed: ImageReader is null")
+        // Wait with diagnostic
+        val deadline = System.currentTimeMillis() + 4_000L
+        while (!isReady && System.currentTimeMillis() < deadline) {
+            // Force poke
+            readerHandler.post {
+                try {
+                    val img = imageReader?.acquireLatestImage()
+                    if (img != null) {
+                        img.close()
+                        isReady = true
+                    }
+                } catch (e: Exception) {}
+            }
+            Thread.sleep(200)
+        }
+
+        if (!isReady) {
+            lastError = "Timeout waiting for frame (Screen might be static or black)"
             return null
         }
 
@@ -144,9 +162,7 @@ class ScreenCaptureService : Service() {
 
         readerHandler.post {
             try {
-                // Gunakan acquireLatestImage untuk mendapatkan frame paling baru
-                val image = imageReader?.acquireLatestImage() ?: imageReader?.acquireNextImage()
-                
+                val image = imageReader?.acquireLatestImage()
                 if (image != null) {
                     try {
                         val planes = image.planes
@@ -155,60 +171,49 @@ class ScreenCaptureService : Service() {
                         val rowStride = planes[0].rowStride
                         val rowPadding = rowStride - pixelStride * screenW
 
-                        // Buat bitmap dengan mempertimbangkan padding
                         val bitmap = Bitmap.createBitmap(
                             screenW + rowPadding / pixelStride,
                             screenH,
                             Bitmap.Config.ARGB_8888
                         )
                         bitmap.copyPixelsFromBuffer(buffer)
-                        
-                        // Crop ke ukuran layar asli
                         result = Bitmap.createBitmap(bitmap, 0, 0, screenW, screenH)
                     } catch (e: Exception) {
-                        Log.e(TAG, "Error processing image: ${e.message}")
+                        lastError = "Bitmap Error: ${e.message}"
                     } finally {
                         image.close()
                     }
                 } else {
-                    Log.e(TAG, "acquireLatestImage returned null")
+                    lastError = "acquireLatestImage NULL"
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Capture error: ${e.message}")
+                lastError = "Reader Thread Error: ${e.message}"
             } finally {
                 latch.countDown()
             }
         }
 
-        try {
-            latch.await(2, TimeUnit.SECONDS)
-        } catch (e: InterruptedException) {
-            Log.e(TAG, "Latch interrupted")
-        }
-        
+        latch.await(2, TimeUnit.SECONDS)
         return result
     }
 
     private fun buildNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("GAssist")
-            .setContentText("Screen capture is active")
+            .setContentTitle("GAssist Diagnostic")
+            .setContentText("Capture Service Active")
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(CHANNEL_ID, "Screen Capture", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL_ID, "Diagnostic", NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
     }
 
     override fun onDestroy() {
-        Log.d(TAG, "Service Destroying")
         isReady = false
         virtualDisplay?.release()
         mediaProjection?.stop()

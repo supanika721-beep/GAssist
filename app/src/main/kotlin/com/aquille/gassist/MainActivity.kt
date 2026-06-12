@@ -5,11 +5,14 @@ import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+<<<<<<< HEAD
 import android.media.projection.MediaProjectionManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+=======
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -22,6 +25,7 @@ import java.util.concurrent.Executors
 
 class MainActivity : AppCompatActivity() {
 
+<<<<<<< HEAD
     private lateinit var tvLog: TextView
     private lateinit var tvStatusChip: TextView
     private lateinit var tvStep: TextView
@@ -31,17 +35,31 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStop: TextView
     private lateinit var btnSettings: TextView
     private lateinit var btnCopyLog: TextView
+=======
+    private lateinit var tvLog:      TextView
+    private lateinit var tvStatus:   TextView
+    private lateinit var etGoal:     EditText
+    private lateinit var btnRun:     Button
+    private lateinit var btnStop:    Button
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
     private lateinit var scrollView: ScrollView
+<<<<<<< HEAD
     private lateinit var progressBar: ProgressBar
     private lateinit var rowStepInfo: LinearLayout
     private lateinit var settingsManager: SettingsManager
+=======
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
 
     private val executor    = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+<<<<<<< HEAD
     private var isRunning   = false
     private var actionHistory = StringBuilder()
+=======
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
 
-    private val PROJECTION_REQUEST = 100
+    @Volatile private var isRunning = false
+    private val PROJECTION_REQUEST  = 100
 
     // ── Network callback — monitor internet continuously ──────────────────────
     private var isInternetConnected = false
@@ -67,6 +85,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+<<<<<<< HEAD
         settingsManager = SettingsManager(this)
 
         tvLog          = findViewById(R.id.tvLog)
@@ -81,7 +100,16 @@ class MainActivity : AppCompatActivity() {
         scrollView     = findViewById(R.id.scrollView)
         progressBar    = findViewById(R.id.progressBar)
         rowStepInfo    = findViewById(R.id.rowStepInfo)
+=======
+        tvLog      = findViewById(R.id.tvLog)
+        tvStatus   = findViewById(R.id.tvStatus)
+        etGoal     = findViewById(R.id.etGoal)
+        btnRun     = findViewById(R.id.btnRun)
+        btnStop    = findViewById(R.id.btnStop)
+        scrollView = findViewById(R.id.scrollView)
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
 
+<<<<<<< HEAD
         // Make log selectable
         tvLog.setTextIsSelectable(true)
         tvLog.text = ""
@@ -165,17 +193,31 @@ class MainActivity : AppCompatActivity() {
                 logInfo("Type a goal and press ▶ to start")
             }
         }
+=======
+        btnRun.setOnClickListener  { startAutomation() }
+        btnStop.setOnClickListener { stopAutomation() }
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
     }
 
     // ── Start automation ──────────────────────────────────────────────────────
 
     private fun startAutomation() {
+<<<<<<< HEAD
         val goal = etGoal.text.toString().trim()
 
         if (goal.isEmpty()) {
             logWarn("Enter a goal first")
             return
+=======
+        log("⏳ Starting Service...")
+        val serviceIntent = Intent(this, ScreenCaptureService::class.java)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
         }
+<<<<<<< HEAD
         if (!isInternetConnected) {
             showNoInternetDialog()
             return
@@ -191,6 +233,17 @@ class MainActivity : AppCompatActivity() {
 
         val projManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         startActivityForResult(projManager.createScreenCaptureIntent(), PROJECTION_REQUEST)
+=======
+
+        mainHandler.postDelayed({
+            val pm = getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+            try {
+                startActivityForResult(pm.createScreenCaptureIntent(), PROJECTION_REQUEST)
+            } catch (e: Exception) {
+                log("✗ Activity Error: ${e.message}")
+            }
+        }, 1000)
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
     }
 
     // ── Dialogs ───────────────────────────────────────────────────────────────
@@ -232,17 +285,32 @@ class MainActivity : AppCompatActivity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == PROJECTION_REQUEST && resultCode == Activity.RESULT_OK && data != null) {
-            val serviceIntent = Intent(this, ScreenCaptureService::class.java).apply {
-                putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, resultCode)
-                putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, data)
+        if (requestCode == PROJECTION_REQUEST) {
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                val initIntent = Intent(this, ScreenCaptureService::class.java).apply {
+                    action = ScreenCaptureService.ACTION_INIT
+                    putExtra(ScreenCaptureService.EXTRA_CODE, resultCode)
+                    putExtra(ScreenCaptureService.EXTRA_DATA, data)
+                }
+                startService(initIntent)
+                log("✅ Permission OK")
+                mainHandler.postDelayed({ 
+                    moveTaskToBack(true)
+                    runLoop() 
+                }, 1500)
+            } else {
+                log("✗ Denied")
             }
+<<<<<<< HEAD
             startForegroundService(serviceIntent)
             logInfo("Starting screen capture service…")
             mainHandler.postDelayed({ runAutomationLoop() }, 2000)
+=======
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
         }
     }
 
+<<<<<<< HEAD
     // ── Automation loop ───────────────────────────────────────────────────────
 
     private fun runAutomationLoop() {
@@ -262,7 +330,15 @@ class MainActivity : AppCompatActivity() {
             logSection("RUNNING  ·  $goal")
         }
 
+=======
+    private fun runLoop() {
+        isRunning = true
+        btnRun.visibility = Button.GONE
+        btnStop.visibility = Button.VISIBLE
+        
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
         executor.execute {
+<<<<<<< HEAD
             var stepCount = 0
             val maxSteps  = 20
 
@@ -277,7 +353,21 @@ class MainActivity : AppCompatActivity() {
                     val alive = ScreenCaptureService.instance != null
                     logErr("Screenshot failed  (service alive: $alive)")
                     break
+=======
+            while (isRunning) {
+                val bmp = ScreenCaptureService.instance?.captureScreen()
+                if (bmp == null) {
+                    val err = ScreenCaptureService.lastError
+                    log("✗ FAILED: $err")
+                    // Jika error karena timeout, mungkin butuh refresh layar
+                    Thread.sleep(2000)
+                } else {
+                    log("📷 Captured: ${bmp.width}x${bmp.height}")
+                    // Lanjut alur AI Anda...
+                    Thread.sleep(3000)
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
                 }
+<<<<<<< HEAD
                 logOk("Screenshot  ${screenshot.width}×${screenshot.height}")
 
                 updateStep(stepCount, maxSteps, "Thinking…")
@@ -328,23 +418,34 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 Thread.sleep(1500)
+=======
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
             }
+<<<<<<< HEAD
 
             if (isRunning && stepCount >= maxSteps) logWarn("Max steps (20) reached")
             mainHandler.post { stopAutomation() }
+=======
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
         }
     }
 
     private fun stopAutomation() {
         isRunning = false
+<<<<<<< HEAD
         btnRun.visibility      = View.VISIBLE
         btnStop.visibility     = View.GONE
         rowStepInfo.visibility = View.GONE
         progressBar.visibility = View.GONE
+=======
+        btnRun.visibility = Button.VISIBLE
+        btnStop.visibility = Button.GONE
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
         stopService(Intent(this, ScreenCaptureService::class.java))
         checkReadiness()
     }
 
+<<<<<<< HEAD
     // ── Copy log ──────────────────────────────────────────────────────────────
 
     private fun copyLogToClipboard() {
@@ -356,7 +457,13 @@ class MainActivity : AppCompatActivity() {
         val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("GAssist Log", text))
         Toast.makeText(this, "Log copied to clipboard", Toast.LENGTH_SHORT).show()
+=======
+    private fun log(msg: String) = mainHandler.post {
+        tvLog.append("$msg\n")
+        scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git
     }
+<<<<<<< HEAD
 
     // ── Logger ────────────────────────────────────────────────────────────────
 
@@ -430,3 +537,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 }
+=======
+}
+>>>>>>> branch 'master' of https://github.com/supanika721-beep/GAssist.git

@@ -2,4 +2,8 @@
 <resources>
     <string name="app_name">GAssist</string>
     <string name="accessibility_description">Allows GAssist AI to control your screen to automate tasks</string>
+    <string name="hint_goal">Describe what you want to automate…</string>
+    <string name="hint_api_key">Paste your API key here…</string>
+    <string name="btn_save">Save Key</string>
+    <string name="link_get_key">Get a free key at aistudio.google.com</string>
 </resources>

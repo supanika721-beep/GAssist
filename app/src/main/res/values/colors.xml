@@ -1,4 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Background layers -->
+    <color name="bg_deep">#12111F</color>
+    <color name="bg_surface">#1C1B2E</color>
+    <color name="bg_card">#252440</color>
+    <color name="bg_input">#1A1930</color>
 
+    <!-- Accent -->
+    <color name="accent_primary">#7C6EE6</color>
+    <color name="accent_glow">#5B4FCE</color>
+    <color name="accent_danger">#E05555</color>
+    <color name="accent_success">#4CAF82</color>
+
+    <!-- Text -->
+    <color name="text_primary">#E6E1F9</color>
+    <color name="text_secondary">#9B97B8</color>
+    <color name="text_muted">#4E4A6B</color>
+    <color name="text_log">#C8C0F0</color>
+
+    <!-- Stroke -->
+    <color name="stroke_default">#2E2B4A</color>
+    <color name="stroke_active">#7C6EE6</color>
 </resources>

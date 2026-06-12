@@ -18,14 +18,16 @@ You are an Android automation AI assistant.
 You will receive a screenshot of the current Android screen.
 Analyze it and decide the next action to complete the user's goal.
 
-Respond ONLY in this JSON format:
-{"thought":"brief reasoning","action":"tap|swipe|type|wait|done","params":{"x":0,"y":0,"x2":0,"y2":0,"text":""}}
+Respond ONLY in this exact JSON format, no extra text:
+{"thought":"brief reasoning","action":"tap|swipe|type|wait|done","x":0,"y":0,"x2":0,"y2":0,"text":""}
 
 Rules:
-- Be concise, no extra text outside JSON
-- If goal is complete, action = "done"
-- Coordinates are screen pixels
-- For swipe, add x2 and y2 in params
+- action must be one of: tap, swipe, type, wait, done
+- If goal is complete, use action = "done"
+- x, y are coordinates for tap or swipe start
+- x2, y2 are swipe end coordinates (only for swipe)
+- text is the string to type (only for type)
+- Always include all fields even if unused (use 0 or "")
 """.trimIndent()
 
     data class AiAction(
@@ -46,13 +48,12 @@ Rules:
         originalWidth: Int,
         originalHeight: Int
     ): AiAction {
-        val targetWidth = 768
+        val targetWidth  = 768
         val targetHeight = 1280
 
         val base64Image = bitmapToBase64(screenshot, targetWidth, targetHeight)
 
         val requestBody = JSONObject().apply {
-            // Fix B: systemInstruction di root
             put("systemInstruction", JSONObject().apply {
                 put("parts", JSONArray().apply {
                     put(JSONObject().apply { put("text", SYSTEM_PROMPT) })
@@ -77,20 +78,20 @@ Rules:
             })
 
             put("generationConfig", JSONObject().apply {
-                put("maxOutputTokens", 150)
+                put("maxOutputTokens", 200)
                 put("temperature", 0.1)
-                put("responseMimeType", "application/json") // Fix C: no markdown fence
+                put("responseMimeType", "application/json")
             })
         }
 
-        val url = URL(API_URL)
+        val url  = URL(API_URL)
         val conn = url.openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         conn.setRequestProperty("Content-Type", "application/json")
-        conn.setRequestProperty("x-goog-api-key", apiKey) // Fix A: key via header only
-        conn.doOutput = true
+        conn.setRequestProperty("x-goog-api-key", apiKey)
+        conn.doOutput      = true
         conn.connectTimeout = 15000
-        conn.readTimeout = 15000
+        conn.readTimeout    = 15000
 
         conn.outputStream.use { it.write(requestBody.toString().toByteArray(Charsets.UTF_8)) }
 
@@ -98,19 +99,19 @@ Rules:
         val responseText = if (responseCode == HttpURLConnection.HTTP_OK) {
             conn.inputStream.bufferedReader().use { it.readText() }
         } else {
-            val errorLog = conn.errorStream?.bufferedReader()?.use { it.readText() }
-            throw Exception("Gemini API Error $responseCode: $errorLog")
+            val errorBody = conn.errorStream?.bufferedReader()?.use { it.readText() }
+            throw Exception("Gemini API Error $responseCode: $errorBody")
         }
 
         val rawAction = parseResponse(responseText)
 
-        // Fix D: kalibrasi koordinat ke resolusi layar asli
-        val scaleX = originalWidth.toFloat() / targetWidth
+        // Kalibrasi koordinat ke resolusi layar asli
+        val scaleX = originalWidth.toFloat()  / targetWidth
         val scaleY = originalHeight.toFloat() / targetHeight
 
         return rawAction.copy(
-            x = (rawAction.x * scaleX).toInt(),
-            y = (rawAction.y * scaleY).toInt(),
+            x  = (rawAction.x  * scaleX).toInt(),
+            y  = (rawAction.y  * scaleY).toInt(),
             x2 = (rawAction.x2 * scaleX).toInt(),
             y2 = (rawAction.y2 * scaleY).toInt()
         )
@@ -127,24 +128,33 @@ Rules:
             .getString("text")
             .trim()
 
-        // responseMimeType = json, jadi langsung parse tanpa cleanup
-        val obj = JSONObject(text)
-        val params = obj.optJSONObject("params") ?: JSONObject()
+        // Bersihkan markdown fence kalau masih ada (jaga-jaga)
+        val clean = text
+            .removePrefix("```json")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+
+        val obj = JSONObject(clean)
+
+        // Support 2 format: flat (x,y di root) ATAU nested params{}
+        // Flat adalah format baru yang lebih konsisten
+        val params = obj.optJSONObject("params")
 
         return AiAction(
-            thought = obj.optString("thought"),
-            action = obj.optString("action", "wait"),
-            x = params.optInt("x"),
-            y = params.optInt("y"),
-            x2 = params.optInt("x2"),
-            y2 = params.optInt("y2"),
-            text = params.optString("text")
+            thought = obj.optString("thought", ""),
+            action  = obj.optString("action", "wait"),
+            x       = params?.optInt("x") ?: obj.optInt("x"),
+            y       = params?.optInt("y") ?: obj.optInt("y"),
+            x2      = params?.optInt("x2") ?: obj.optInt("x2"),
+            y2      = params?.optInt("y2") ?: obj.optInt("y2"),
+            text    = params?.optString("text") ?: obj.optString("text", "")
         )
     }
 
     private fun bitmapToBase64(bitmap: Bitmap, width: Int, height: Int): String {
         val scaled = Bitmap.createScaledBitmap(bitmap, width, height, true)
-        val baos = ByteArrayOutputStream()
+        val baos   = ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.JPEG, 60, baos)
         return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
     }

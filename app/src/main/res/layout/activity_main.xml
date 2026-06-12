@@ -1,112 +1,227 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0A0E14"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:background="@color/bg_deep">
 
-    <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginBottom="8dp">
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
+        <!-- Top bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="20dp"
+            android:background="@color/bg_deep">
+
+            <View
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="@drawable/shape_dot"
+                android:layout_marginEnd="10dp" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="GAssist"
+                android:textColor="@color/text_primary"
+                android:textSize="20sp"
+                android:letterSpacing="0.05"
+                android:fontFamily="sans-serif-medium" />
+
+            <TextView
+                android:id="@+id/tvStatusChip"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:text="Checking…"
+                android:textColor="@color/accent_primary"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingHorizontal="12dp"
+                android:background="@drawable/shape_chip" />
+
+            <TextView
+                android:id="@+id/btnSettings"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:text="⚙"
+                android:textSize="18sp"
+                android:textColor="@color/text_secondary"
+                android:gravity="center"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/shape_icon_btn" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/stroke_default" />
+
+        <!-- Log label row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="20dp"
+            android:background="@color/bg_deep">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="LOG"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp"
+                android:letterSpacing="0.12"
+                android:fontFamily="sans-serif-medium" />
+
+            <TextView
+                android:id="@+id/btnCopyLog"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:text="Copy all"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingHorizontal="10dp"
+                android:background="@drawable/shape_chip" />
+        </LinearLayout>
+
+        <!-- Log area -->
+        <ScrollView
+            android:id="@+id/scrollView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
             android:layout_weight="1"
-            android:text="GAssist"
-            android:textColor="#00D4FF"
-            android:textSize="18sp"
-            android:fontFamily="monospace"
-            android:textStyle="bold" />
+            android:overScrollMode="never"
+            android:fadingEdge="vertical"
+            android:requiresFadingEdge="vertical"
+            android:fadingEdgeLength="32dp"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="8dp"
+            android:clipToPadding="false">
 
-        <Button
-            android:id="@+id/btnSettings"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="⚙ Settings"
-            android:textColor="#00D4FF"
-            android:backgroundTint="#1A2030"
-            android:fontFamily="monospace"
-            android:textSize="12sp" />
-    </LinearLayout>
+            <TextView
+                android:id="@+id/tvLog"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textColor="@color/text_log"
+                android:textSize="12sp"
+                android:lineSpacingMultiplier="1.5"
+                android:paddingBottom="24dp"
+                android:text=""
+                android:textIsSelectable="true" />
+        </ScrollView>
 
-    <!-- Log output -->
-    <ScrollView
-        android:id="@+id/scrollView"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:background="#111820"
-        android:padding="8dp">
-
-        <TextView
-            android:id="@+id/tvLog"
+        <!-- Bottom card -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textColor="#00D4FF"
-            android:textSize="12sp"
-            android:text="[GAssist Ready]\n" />
-    </ScrollView>
+            android:orientation="vertical"
+            android:background="@drawable/shape_bottom_card"
+            android:padding="20dp"
+            android:elevation="8dp">
 
-    <!-- Status -->
-    <TextView
-        android:id="@+id/tvStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingVertical="4dp"
-        android:textColor="#888888"
-        android:fontFamily="monospace"
-        android:textSize="11sp"
-        android:text="Status: Idle" />
+            <!-- Step info row -->
+            <LinearLayout
+                android:id="@+id/rowStepInfo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="12dp"
+                android:visibility="gone">
 
-    <!-- Input -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginTop="8dp">
+                <TextView
+                    android:id="@+id/tvStep"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Step 0 / 20"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace" />
 
-        <EditText
-            android:id="@+id/etGoal"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="Enter task goal..."
-            android:textColor="#FFFFFF"
-            android:textColorHint="#555555"
-            android:background="#1A2030"
-            android:padding="10dp"
-            android:fontFamily="monospace"
-            android:textSize="13sp"
-            android:inputType="text"
-            android:imeOptions="actionSend" />
+                <TextView
+                    android:id="@+id/tvStatusDetail"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textColor="@color/accent_primary"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace" />
+            </LinearLayout>
 
-        <Button
-            android:id="@+id/btnRun"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="RUN"
-            android:textColor="#0A0E14"
-            android:backgroundTint="#00D4FF"
-            android:fontFamily="monospace" />
+            <!-- Progress bar -->
+            <ProgressBar
+                android:id="@+id/progressBar"
+                style="@style/Widget.AppCompat.ProgressBar.Horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="3dp"
+                android:max="20"
+                android:progress="0"
+                android:progressTint="@color/accent_primary"
+                android:progressBackgroundTint="@color/stroke_default"
+                android:layout_marginBottom="16dp"
+                android:visibility="gone" />
+
+            <!-- Input row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <EditText
+                    android:id="@+id/etGoal"
+                    android:layout_width="0dp"
+                    android:layout_height="50dp"
+                    android:layout_weight="1"
+                    android:hint="@string/hint_goal"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/text_muted"
+                    android:textSize="14sp"
+                    android:background="@drawable/shape_input"
+                    android:paddingHorizontal="16dp"
+                    android:inputType="textCapSentences|textMultiLine"
+                    android:maxLines="2"
+                    android:imeOptions="actionSend"
+                    android:fontFamily="sans-serif" />
+
+                <TextView
+                    android:id="@+id/btnRun"
+                    android:layout_width="56dp"
+                    android:layout_height="50dp"
+                    android:text="▶"
+                    android:textSize="20sp"
+                    android:textColor="#FFFFFF"
+                    android:gravity="center"
+                    android:layout_marginStart="10dp"
+                    android:background="@drawable/shape_btn_run" />
+
+                <TextView
+                    android:id="@+id/btnStop"
+                    android:layout_width="56dp"
+                    android:layout_height="50dp"
+                    android:text="■"
+                    android:textSize="20sp"
+                    android:textColor="#FFFFFF"
+                    android:gravity="center"
+                    android:layout_marginStart="10dp"
+                    android:background="@drawable/shape_btn_stop"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </LinearLayout>
     </LinearLayout>
 
-    <Button
-        android:id="@+id/btnStop"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="STOP"
-        android:textColor="#0A0E14"
-        android:backgroundTint="#FF4444"
-        android:fontFamily="monospace"
-        android:visibility="gone" />
-
-</LinearLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>
